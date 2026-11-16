@@ -1,0 +1,64 @@
+{
+  "name": "solid-vc-motion",
+  "version": "0.1.0",
+  "description": "Motion (motion.dev) animations for Solid 2.0: motion components, motion values, AnimatePresence and layout animations. Experimental.",
+  "keywords": [
+    "animation",
+    "framer-motion",
+    "layout-animation",
+    "motion",
+    "solid",
+    "solidjs"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "vp dev playground",
+    "build": "vp pack",
+    "build:playground": "vp build playground",
+    "check": "vp check",
+    "fmt": "vp fmt",
+    "lint": "vp lint",
+    "test": "vp test",
+    "compare": "cd compare-react && vp dev",
+    "prepublishOnly": "vp check && vp test && vp pack"
+  },
+  "dependencies": {
+    "csstype": "^3.2.3",
+    "motion-dom": "^14.14.0",
+    "motion-utils": "^14.7.0"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "^1.0.0-rc.2",
+    "@solidjs/vite-plugin": "^3.0.0-next.57",
+    "@solidjs/web": "^2.0.0-rc.22",
+    "jsdom": "^31.0.1",
+    "solid-js": "^2.0.0-rc.22",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0"
+  },
+  "peerDependencies": {
+    "@solidjs/web": "^2.0.0-rc.22",
+    "solid-js": "^2.0.0-rc.22"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0"
+  }
+}

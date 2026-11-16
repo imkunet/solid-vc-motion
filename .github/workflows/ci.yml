@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v7
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: install dependencies
+        run: bun i && bunx vp i && cd compare-react && bun i && bunx vp i
+
+      - name: build package
+        run: bunx vp pack
+
+      - name: release new version
+        run: npm publish

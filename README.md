@@ -5,14 +5,14 @@
 >
 > It's a stopgap until Solid has proper, mature animation libraries. Expect rough edges and bugs. Don't build anything important on it without having a willingness to get your hands dirty. If something better exists by the time you read this, use that.
 
-[Motion](https://motion.dev) for Solid 2.0 RC. It gives you `motion.*` components, motion values, `AnimatePresence` and layout animations (including shared `layoutId` transitions).
+[Motion](https://motion.dev) for Solid 2.0. It gives you `motion.*` components, motion values, `AnimatePresence` and layout animations (including shared `layoutId` transitions).
 
 It only covers the Solid side. The animation engine is `motion-dom`, the same package Motion for React runs on, so springs, variants, gestures and layout projection behave the way they do in React. The API follows Motion for React, except where Solid works differently.
 
-Needs `solid-js` and `@solidjs/web` 2.0 (currently release candidates).
+Requires `solid-js` and `@solidjs/web` 2.0.
 
 ```sh
-npm install solid-vc-motion solid-js@next @solidjs/web@next
+npm install solid-vc-motion solid-js @solidjs/web
 ```
 
 ## Example

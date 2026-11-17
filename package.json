@@ -1,6 +1,6 @@
 {
   "name": "solid-vc-motion",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Motion (motion.dev) animations for Solid 2.0: motion components, motion values, AnimatePresence and layout animations. Experimental.",
   "keywords": [
     "animation",

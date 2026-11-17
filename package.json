@@ -2,10 +2,6 @@
   "name": "solid-vc-motion",
   "version": "0.1.1",
   "description": "Motion (motion.dev) animations for Solid 2.0: motion components, motion values, AnimatePresence and layout animations. Experimental.",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/imkunet/solid-vc-motion.git"
-  },
   "keywords": [
     "animation",
     "framer-motion",
@@ -15,6 +11,10 @@
     "solidjs"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imkunet/solid-vc-motion.git"
+  },
   "files": [
     "dist",
     "README.md",

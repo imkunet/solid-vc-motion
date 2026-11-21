@@ -1,3 +1,4 @@
+export { createAnimate, type AnimateScope } from "./animate";
 export { AnimatePresence, type AnimatePresenceProps } from "./components/AnimatePresence";
 export { LayoutGroup, type LayoutGroupProps } from "./components/LayoutGroup";
 export { MotionConfig, type MotionConfigProps } from "./components/MotionConfig";
@@ -22,6 +23,7 @@ export type {
   MotionComponentProps,
   MotionProps,
   MotionStyle,
+  ViewportOptions,
 } from "./types";
 export {
   createMotionTemplate,
@@ -31,12 +33,17 @@ export {
   createTransform,
   fromMotionValue,
 } from "./value";
+export { createScroll, type ScrollMotionValues, type ScrollOptions } from "./value/scroll";
+export { animate, inView, scroll, scrollInfo, type AnimationSequence } from "motion";
 export {
   isMotionValue,
   motionValue,
   stagger,
   MotionValue,
   transform,
+  type PanInfo,
+  type PinchInfo,
+  type PinchProps,
   type SpringOptions,
   type TargetAndTransition,
   type Transition,

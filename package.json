@@ -45,8 +45,9 @@
   },
   "dependencies": {
     "csstype": "^3.2.3",
-    "motion-dom": "^14.14.0",
-    "motion-utils": "^14.7.0"
+    "motion": "14.14.0",
+    "motion-dom": "14.14.0",
+    "motion-utils": "14.7.0"
   },
   "devDependencies": {
     "@solidjs/testing-library": "^1.0.0-rc.2",

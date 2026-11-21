@@ -1,9 +1,12 @@
 import { render } from "@solidjs/web";
 import { createSignal, For, Show } from "solid-js";
 import {
+  animate,
   AnimatePresence,
+  createAnimate,
   createMotionTemplate,
   createMotionValue,
+  createScroll,
   createSpring,
   createTransform,
   fromMotionValue,
@@ -377,9 +380,130 @@ function Gallery() {
   );
 }
 
+function ScrollProgress() {
+  const { scrollYProgress } = createScroll();
+  return (
+    <motion.div
+      class="progress"
+      data-testid="scroll-progress"
+      style={{ scaleX: scrollYProgress }}
+    />
+  );
+}
+
+function InView() {
+  const [scroller, setScroller] = createSignal<HTMLDivElement>();
+  const [target, setTarget] = createSignal<HTMLDivElement>();
+  const { scrollYProgress } = createScroll({
+    container: scroller,
+    target,
+    offset: ["start end", "end start"],
+  });
+  const rotate = createTransform(scrollYProgress, [0, 1], [-90, 90]);
+  const [entered, setEntered] = createSignal(0);
+  return (
+    <section data-demo="in-view">
+      <h2>In view, scroll-linked</h2>
+      <p>
+        Entered: <span data-testid="in-view-count">{entered()}</span>
+      </p>
+      <div class="scroller" data-testid="in-view-scroller" ref={setScroller}>
+        <For each={[1, 2, 3, 4]}>
+          {(n) => (
+            <motion.div
+              class="card muted"
+              initial={{ opacity: 0, x: -40 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ root: scroller(), amount: 0.6 }}
+              onViewportEnter={() => setEntered((count) => count + 1)}
+            >
+              Item {n}
+            </motion.div>
+          )}
+        </For>
+        <div class="row spin-row" ref={setTarget}>
+          <motion.div class="box small" data-testid="scroll-spin" style={{ rotate }} />
+        </div>
+        <For each={[5, 6, 7, 8]}>
+          {(n) => (
+            <motion.div
+              class="card muted"
+              initial={{ opacity: 0, x: -40 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ root: scroller(), amount: 0.6, once: true }}
+            >
+              Item {n} (once)
+            </motion.div>
+          )}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function PanPinch() {
+  const x = createMotionValue(0);
+  const y = createMotionValue(0);
+  const [scale, setScale] = createSignal(1);
+  return (
+    <section data-demo="pan-pinch">
+      <h2>Pan, pinch</h2>
+      <div class="row stage">
+        <motion.div
+          class="box"
+          data-testid="pan-box"
+          style={{ x, y, "touch-action": "none" }}
+          onPan={(_event, info) => {
+            x.set(info.offset.x);
+            y.set(info.offset.y);
+          }}
+          onPanEnd={() => {
+            animate(x, 0, { type: "spring" });
+            animate(y, 0, { type: "spring" });
+          }}
+        />
+        <motion.div
+          class="box"
+          data-testid="pinch-box"
+          pinch={{
+            scale: { min: 0.5, max: 3 },
+            onMove: (_event, info) => setScale(info.scale),
+          }}
+          whilePinch={{ background: "#10b981" }}
+        />
+        <p>
+          Pinch scale: <span data-testid="pinch-scale">{scale().toFixed(2)}</span>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function Sequence() {
+  const [scope, animate] = createAnimate<HTMLDivElement>();
+  const play = () =>
+    animate([
+      [".dot", { y: -40 }, { delay: stagger(0.08), duration: 0.2 }],
+      [".dot", { y: 0 }, { delay: stagger(0.08), type: "spring", bounce: 0.5 }],
+      ["button", { rotate: [0, -8, 8, 0] }, { duration: 0.3 }],
+    ]);
+  return (
+    <section data-demo="sequence">
+      <h2>createAnimate, sequences</h2>
+      <div class="row stage" ref={scope}>
+        <button data-testid="sequence-play" onClick={play}>
+          Play
+        </button>
+        <For each={[1, 2, 3, 4, 5]}>{() => <div class="dot" />}</For>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   return (
     <MotionConfig transition={{ duration: 0.4 }}>
+      <ScrollProgress />
       <main>
         <h1>solid-vc-motion</h1>
         <Basics />
@@ -393,6 +517,9 @@ function App() {
         <Shuffle />
         <Tabs />
         <Gallery />
+        <InView />
+        <PanPinch />
+        <Sequence />
       </main>
     </MotionConfig>
   );

@@ -7,11 +7,15 @@ import type {
   MotionNodeFocusHandlers,
   MotionNodeHoverHandlers,
   MotionNodeLayoutOptions,
+  MotionNodeOptions,
+  MotionNodePanHandlers,
   MotionNodeTapHandlers,
+  MotionNodeViewportOptions,
   MotionValue,
   PropagateOptions,
   SVGPathProperties,
   TransformProperties,
+  ViewportOptions as RefViewportOptions,
 } from "motion-dom";
 
 type StyleMotionValue = MotionValue<number> | MotionValue<string>;
@@ -32,17 +36,27 @@ export type MotionStyle = WithMotionValues<CSS.Properties<string | number>> &
     [variable: `--${string}`]: string | number | StyleMotionValue | undefined;
   };
 
+/** When `whileInView` and `onViewportEnter`/`onViewportLeave` fire. */
+export interface ViewportOptions extends Omit<RefViewportOptions, "root"> {
+  /** The scrolling element to observe within. Defaults to the viewport. */
+  root?: Element | Document | null;
+}
+
 export interface MotionProps
   extends
     MotionNodeAnimationOptions,
     MotionNodeEventOptions,
+    MotionNodePanHandlers,
     MotionNodeTapHandlers,
     MotionNodeHoverHandlers,
     MotionNodeFocusHandlers,
+    Omit<MotionNodeViewportOptions, "viewport">,
+    Pick<MotionNodeOptions, "pinch" | "whilePinch">,
     MotionNodeLayoutOptions,
     MotionNodeAdvancedOptions {
   style?: MotionStyle;
   propagate?: PropagateOptions;
+  viewport?: ViewportOptions;
   /**
    * Identity inside AnimatePresence, like React's `key`: an entering element
    * takes over from an exiting one with the same key. Without keys, an

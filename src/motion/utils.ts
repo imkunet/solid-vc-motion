@@ -16,9 +16,13 @@ const motionPropNames = new Set([
   "onHoverStart",
   "onHoverEnd",
   "globalTapTarget",
+  "onViewportEnter",
+  "onViewportLeave",
   "tap",
   "propagate",
   "ignoreStrict",
+  "viewport",
+  "pinch",
 ]);
 
 /** Whether a prop is consumed by Motion rather than the rendered element. */

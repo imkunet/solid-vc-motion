@@ -3,18 +3,23 @@
  * behaviour side by side. Same markup, classes and test ids.
  */
 import {
+  animate,
   AnimatePresence,
   LayoutGroup,
+  LazyMotion,
   motion,
   MotionConfig,
+  pinchFeatures,
   stagger,
+  useAnimate,
   useMotionTemplate,
   useMotionValue,
   useMotionValueEvent,
+  useScroll,
   useSpring,
   useTransform,
 } from "motion/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../playground/styles.css";
 
@@ -380,9 +385,132 @@ function Gallery() {
   );
 }
 
+function ScrollProgress() {
+  const { scrollYProgress } = useScroll();
+  return (
+    <motion.div
+      className="progress"
+      data-testid="scroll-progress"
+      style={{ scaleX: scrollYProgress }}
+    />
+  );
+}
+
+function InView() {
+  const scroller = useRef<HTMLDivElement>(null);
+  const target = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    container: scroller,
+    target,
+    offset: ["start end", "end start"],
+  });
+  const rotate = useTransform(scrollYProgress, [0, 1], [-90, 90]);
+  const [entered, setEntered] = useState(0);
+  return (
+    <section data-demo="in-view">
+      <h2>In view, scroll-linked</h2>
+      <p>
+        Entered: <span data-testid="in-view-count">{entered}</span>
+      </p>
+      <div className="scroller" data-testid="in-view-scroller" ref={scroller}>
+        {[1, 2, 3, 4].map((n) => (
+          <motion.div
+            key={n}
+            className="card muted"
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ root: scroller, amount: 0.6 }}
+            onViewportEnter={() => setEntered((count) => count + 1)}
+          >
+            Item {n}
+          </motion.div>
+        ))}
+        <div className="row spin-row" ref={target}>
+          <motion.div className="box small" data-testid="scroll-spin" style={{ rotate }} />
+        </div>
+        {[5, 6, 7, 8].map((n) => (
+          <motion.div
+            key={n}
+            className="card muted"
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ root: scroller, amount: 0.6, once: true }}
+          >
+            Item {n} (once)
+          </motion.div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PanPinch() {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const [scale, setScale] = useState(1);
+  return (
+    <section data-demo="pan-pinch">
+      <h2>Pan, pinch</h2>
+      <div className="row stage">
+        <motion.div
+          className="box"
+          data-testid="pan-box"
+          style={{ x, y, touchAction: "none" }}
+          onPan={(_event, info) => {
+            x.set(info.offset.x);
+            y.set(info.offset.y);
+          }}
+          onPanEnd={() => {
+            animate(x, 0, { type: "spring" });
+            animate(y, 0, { type: "spring" });
+          }}
+        />
+        <LazyMotion features={pinchFeatures}>
+          <motion.div
+            className="box"
+            data-testid="pinch-box"
+            pinch={{
+              scale: { min: 0.5, max: 3 },
+              onMove: (_event, info) => setScale(info.scale),
+            }}
+            whilePinch={{ background: "#10b981" }}
+          />
+        </LazyMotion>
+        <p>
+          Pinch scale: <span data-testid="pinch-scale">{scale.toFixed(2)}</span>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function Sequence() {
+  const [scope, animate] = useAnimate<HTMLDivElement>();
+  const play = () =>
+    animate([
+      [".dot", { y: -40 }, { delay: stagger(0.08), duration: 0.2 }],
+      [".dot", { y: 0 }, { delay: stagger(0.08), type: "spring", bounce: 0.5 }],
+      ["button", { rotate: [0, -8, 8, 0] }, { duration: 0.3 }],
+    ]);
+  return (
+    <section data-demo="sequence">
+      <h2>useAnimate, sequences</h2>
+      <div className="row stage" ref={scope}>
+        <button data-testid="sequence-play" onClick={play}>
+          Play
+        </button>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <div key={n} className="dot" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function App() {
   return (
     <MotionConfig transition={{ duration: 0.4 }}>
+      <ScrollProgress />
       <main>
         <h1>Motion for React (comparison)</h1>
         <Basics />
@@ -396,6 +524,9 @@ function App() {
         <Shuffle />
         <Tabs />
         <Gallery />
+        <InView />
+        <PanPinch />
+        <Sequence />
       </main>
     </MotionConfig>
   );

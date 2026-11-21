@@ -1,20 +1,27 @@
 import {
   addDomEvent,
+  addPinchListeners,
+  addPointerEvent,
   createAnimationState,
   extractEventInfo,
   Feature,
   frame,
   hover,
   isAnimationControls,
+  PanSession,
   press,
   resolveVariant,
   setFeatureDefinitions,
+  variantPriorityOrder,
   type FeatureClass,
   type MotionNodeOptions,
+  type PanInfo,
+  type PinchProps,
   type PointerEventOptions,
   type VisualElement,
 } from "motion-dom";
 import { pipe } from "motion-utils";
+import type { ViewportOptions } from "../types";
 
 /*
  * VisualElement features, ported from Motion for React. They're plain
@@ -228,6 +235,218 @@ class FocusGesture extends Feature<Element> {
   unmount() {}
 }
 
+/*
+ * IntersectionObservers are shared per root and settings. Each element has
+ * one callback, so the callbacks of every observer share one map.
+ */
+const intersectionCallbacks = new WeakMap<Element, (entry: IntersectionObserverEntry) => void>();
+const intersectionObservers = new WeakMap<Element | Document, Map<string, IntersectionObserver>>();
+
+function observeIntersection(
+  element: Element,
+  { root, ...options }: IntersectionObserverInit,
+  callback: (entry: IntersectionObserverEntry) => void,
+) {
+  const lookupRoot = root || document;
+  let rootObservers = intersectionObservers.get(lookupRoot);
+  if (!rootObservers) intersectionObservers.set(lookupRoot, (rootObservers = new Map()));
+  const key = JSON.stringify(options);
+  let observer = rootObservers.get(key);
+  if (!observer) {
+    observer = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => intersectionCallbacks.get(entry.target)?.(entry)),
+      { root, ...options },
+    );
+    rootObservers.set(key, observer);
+  }
+  intersectionCallbacks.set(element, callback);
+  observer.observe(element);
+  return () => {
+    intersectionCallbacks.delete(element);
+    observer.unobserve(element);
+  };
+}
+
+const thresholds = { some: 0, all: 1 };
+
+/** MotionProps types `viewport.root` as an element rather than React's ref object. */
+const viewportOf = (props: MotionNodeOptions | undefined) =>
+  (props?.viewport ?? {}) as unknown as ViewportOptions;
+
+/** `whileInView`, `onViewportEnter` and `onViewportLeave`. */
+class InViewFeature extends Feature<Element> {
+  private hasEnteredView = false;
+  private isInView = false;
+  private stopObserver?: VoidFunction;
+
+  private startObserver() {
+    this.stopObserver?.();
+    const { current } = this.node;
+    if (!current || typeof IntersectionObserver === "undefined") return;
+
+    const { root, margin, amount = "some" } = viewportOf(this.node.getProps());
+    this.stopObserver = observeIntersection(
+      current,
+      {
+        root,
+        rootMargin: margin,
+        threshold: typeof amount === "number" ? amount : thresholds[amount],
+      },
+      (entry) => {
+        const { isIntersecting } = entry;
+        if (this.isInView === isIntersecting) return;
+        this.isInView = isIntersecting;
+
+        // Read live, so `once` and the callbacks can change after mount.
+        if (viewportOf(this.node.getProps()).once && !isIntersecting && this.hasEnteredView) {
+          return;
+        }
+        if (isIntersecting) this.hasEnteredView = true;
+
+        void this.node.animationState?.setActive("whileInView", isIntersecting);
+        const { onViewportEnter, onViewportLeave } = this.node.getProps();
+        (isIntersecting ? onViewportEnter : onViewportLeave)?.(entry);
+      },
+    );
+  }
+
+  mount() {
+    this.startObserver();
+  }
+
+  update() {
+    const previous = viewportOf(this.node.prevProps);
+    const viewport = viewportOf(this.node.getProps());
+    const hasChanged = (["amount", "margin", "root"] as const).some(
+      (name) => viewport[name] !== previous[name],
+    );
+    if (hasChanged) this.startObserver();
+  }
+
+  unmount() {
+    this.stopObserver?.();
+    this.stopObserver = undefined;
+    this.hasEnteredView = false;
+    this.isInView = false;
+  }
+}
+
+/** `onPanSessionStart`, `onPanStart`, `onPan` and `onPanEnd`. */
+class PanGesture extends Feature<Element> {
+  private session?: PanSession;
+  private removePointerDownListener?: VoidFunction;
+
+  private createHandlers() {
+    const props = this.node.getProps();
+    // PanSession types its events as Event; they're the pointer events it listens to.
+    const onFrame =
+      (name: "onPanSessionStart" | "onPanStart" | "onPan") => (event: Event, info: PanInfo) => {
+        const pointerEvent = event as PointerEvent;
+        // Pan handlers run in the frame's update step, as in React.
+        if (props[name]) frame.update(() => props[name]?.(pointerEvent, info), false, true);
+      };
+    return {
+      onSessionStart: onFrame("onPanSessionStart"),
+      onStart: onFrame("onPanStart"),
+      onMove: onFrame("onPan"),
+      onEnd: (event: Event, info: PanInfo) => {
+        this.session = undefined;
+        const pointerEvent = event as PointerEvent;
+        if (props.onPanEnd) frame.postRender(() => props.onPanEnd?.(pointerEvent, info));
+      },
+    };
+  }
+
+  mount() {
+    const { current } = this.node;
+    if (!current) return;
+    this.removePointerDownListener = addPointerEvent(current, "pointerdown", (event) => {
+      this.session = new PanSession(event, this.createHandlers(), {
+        transformPagePoint: this.node.getTransformPagePoint(),
+        contextWindow: current.ownerDocument.defaultView,
+      });
+    });
+  }
+
+  update() {
+    this.session?.updateHandlers(this.createHandlers());
+  }
+
+  unmount() {
+    this.removePointerDownListener?.();
+    this.session?.end();
+  }
+}
+
+const pinchValueKeys = ["scale", "rotate", "x", "y"] as const;
+
+/** The `pinch` prop and `whilePinch`. */
+class PinchGesture extends Feature<HTMLElement | SVGElement> {
+  /** The element's touch-action not set by `style`, restored when pinch turns off. */
+  private touchAction = "";
+
+  /** The touch-action `style` sets, in either key style. */
+  private styleTouchAction() {
+    const { style } = this.node.getProps() as { style?: Record<string, unknown> };
+    const own = style?.touchAction ?? style?.["touch-action"];
+    return typeof own === "string" && own ? own : undefined;
+  }
+
+  mount() {
+    const { current } = this.node;
+    if (!current) return;
+    // Inline touch-action from `style` is Solid's to set and clear.
+    if (!this.styleTouchAction()) this.touchAction = current.style.touchAction;
+    this.update();
+
+    /**
+     * The latest enabled options. addPinchListeners reads them before
+     * each step, so a pinch disabled mid-way still calls its `onEnd`.
+     */
+    let options: PinchProps = {};
+    const call =
+      (key: "onStart" | "onMove" | "onEnd") =>
+      (event: Event, info: Parameters<NonNullable<PinchProps["onMove"]>>[1]) =>
+        options[key]?.(event, info);
+
+    this.unmount = addPinchListeners(
+      current,
+      () => pinchValueKeys.map((key) => this.node.getValue(key, key === "scale" ? 1 : 0)) as never,
+      () => {
+        const { pinch } = this.node.getProps();
+        return pinch && (options = pinch === true ? {} : pinch);
+      },
+      (_element, event, info) => {
+        const setActive = (isActive: boolean) =>
+          void this.node.animationState?.setActive("whilePinch", isActive);
+        setActive(true);
+        call("onStart")(event, info);
+        return {
+          onPinch: call("onMove"),
+          onComplete: (endEvent, endInfo) => {
+            setActive(false);
+            call("onEnd")(endEvent, endInfo);
+          },
+        };
+      },
+    );
+  }
+
+  /**
+   * Stops touches panning or zooming the page while pinch is on, unless
+   * `style` sets a touch-action (like "pan-y", for a list that still
+   * scrolls with one finger).
+   */
+  update() {
+    const element = this.node.current;
+    if (!element) return;
+    const { pinch } = this.node.getProps();
+    element.style.touchAction = this.styleTouchAction() ?? (pinch ? "none" : this.touchAction);
+  }
+
+  unmount() {}
+}
+
 const enabledBy =
   (...names: string[]) =>
   (props: MotionNodeOptions) =>
@@ -250,16 +469,7 @@ export function initFeatures() {
 
   setFeatureDefinitions({
     animation: {
-      isEnabled: enabledBy(
-        "variants",
-        "animate",
-        "whileInView",
-        "whileFocus",
-        "whileHover",
-        "whileTap",
-        "whileDrag",
-        "exit",
-      ),
+      isEnabled: enabledBy("variants", ...variantPriorityOrder),
       Feature: asFeature(AnimationFeature),
     },
     exit: { isEnabled: enabledBy("exit"), Feature: asFeature(ExitAnimationFeature) },
@@ -272,5 +482,14 @@ export function initFeatures() {
       Feature: asFeature(PressGesture),
     },
     focus: { isEnabled: enabledBy("whileFocus"), Feature: asFeature(FocusGesture) },
+    inView: {
+      isEnabled: enabledBy("whileInView", "onViewportEnter", "onViewportLeave"),
+      Feature: asFeature(InViewFeature),
+    },
+    pan: {
+      isEnabled: enabledBy("onPan", "onPanStart", "onPanSessionStart", "onPanEnd"),
+      Feature: asFeature(PanGesture),
+    },
+    pinch: { isEnabled: enabledBy("pinch"), Feature: asFeature(PinchGesture) },
   });
 }

@@ -74,9 +74,12 @@ export interface PresenceController {
   /** Tracks a created, not yet mounted motion component. */
   enter(entrant: PresenceEntrant): VoidFunction;
   /**
-   * Withheld children (mode="wait") are created before they're inserted.
-   * Their mount runs once the presence inserts them. Returns a cancel.
+   * Whether `element` is inside a child this presence, or an outer one,
+   * keeps out of the DOM: mode="wait" creates entering children before it
+   * inserts them.
    */
+  isWithheld(element: Element): boolean;
+  /** Runs `mount` once `element` is no longer withheld. Returns a cancel. */
   deferMount(element: Element, mount: VoidFunction): VoidFunction;
 }
 

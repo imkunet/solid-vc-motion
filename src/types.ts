@@ -1,6 +1,7 @@
 import type { JSX } from "@solidjs/web";
 import type * as CSS from "csstype";
 import type {
+  AnyResolvedKeyframe,
   MotionNodeAdvancedOptions,
   MotionNodeAnimationOptions,
   MotionNodeEventOptions,
@@ -18,7 +19,11 @@ import type {
   ViewportOptions as RefViewportOptions,
 } from "motion-dom";
 
-type StyleMotionValue = MotionValue<number> | MotionValue<string>;
+/** MotionValue is invariant, so each value type is listed. */
+type StyleMotionValue =
+  | MotionValue<number>
+  | MotionValue<string>
+  | MotionValue<AnyResolvedKeyframe>;
 
 type WithMotionValues<T> = {
   [K in keyof T]?: T[K] | StyleMotionValue;
@@ -79,5 +84,14 @@ export type HTMLMotionProps<Tag extends keyof JSX.IntrinsicElements> = Omit<
 > &
   MotionProps & { children?: MotionChildren };
 
+/**
+ * Props of `motion.create(Component)`: the component's props with the
+ * motion props layered on top. Its `children` also accept a motion value,
+ * forwarded as a text node.
+ */
 export type MotionComponentProps<Props> = Omit<Props, keyof MotionProps | "children"> &
-  MotionProps & { children?: MotionChildren };
+  MotionProps & {
+    children?: "children" extends keyof Props
+      ? Props["children" & keyof Props] | MotionChildren
+      : MotionChildren;
+  };

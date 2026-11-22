@@ -35,6 +35,13 @@ import {
 /** Until a snapshot exists, mounting nodes needn't trigger a layout update. */
 let hasTakenAnySnapshot = false;
 
+/**
+ * Scopes snapshotted since the DOM last changed. Their nodes stay
+ * snapshotted until the root updates, so N siblings changing together scan
+ * the tree once rather than N times.
+ */
+const snapshotScopes = new Set<Element>();
+
 export const isLayoutNode = (props: MotionNodeOptions) => Boolean(props.layout || props.layoutId);
 
 /**
@@ -62,7 +69,10 @@ export function snapshotLayout(scope: Element | null | undefined, trigger?: IPro
   if (!root) return;
 
   hasTakenAnySnapshot = true;
-  if (scope) {
+  if (scope && !snapshotScopes.has(scope)) {
+    // The root updates within this tick; later changes need new snapshots.
+    if (!snapshotScopes.size) queueMicrotask(() => snapshotScopes.clear());
+    snapshotScopes.add(scope);
     // The root's FlatTree is typed by depth only; it holds projection nodes.
     root.nodes!.forEach((entry) => {
       const node = entry as IProjectionNode;
@@ -86,8 +96,14 @@ export const scopeOf = (projection: IProjectionNode) => {
   return parent && layoutScope(parent);
 };
 
-/** Measures and animates every layout node snapshotted before the DOM change. */
+/**
+ * Measures and animates every layout node snapshotted before the DOM change.
+ * Solid can change the DOM again before the root updates (an effect writing
+ * a signal), and this change may have moved nodes into a snapshotted scope,
+ * so the next snapshot scans again.
+ */
 export function commitLayout() {
+  snapshotScopes.clear();
   rootProjectionNode.current?.didUpdate();
 }
 
@@ -152,7 +168,7 @@ export class LayoutController {
     this.isMounted = true;
 
     group?.add(projection);
-    if (hasTakenAnySnapshot) projection.root!.didUpdate();
+    if (hasTakenAnySnapshot) commitLayout();
 
     if (projection.options.layoutId !== props.layoutId) {
       switchLayoutId(projection, props.layoutId)?.();
@@ -196,7 +212,7 @@ export class LayoutController {
     if (!this.isMounted) return;
     this.takeOver?.();
     this.takeOver = undefined;
-    this.projection.root!.didUpdate();
+    commitLayout();
   }
 
   /**
@@ -216,7 +232,7 @@ export class LayoutController {
         if (!projection.getStack()?.members.length) this.safeToRemove();
       });
     }
-    projection.root!.didUpdate();
+    commitLayout();
     microtask.postRender(() => {
       if (!projection.currentAnimation && projection.isLead()) {
         this.safeToRemove();

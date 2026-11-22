@@ -1,4 +1,11 @@
-import { applyRef, dynamic, isServer, type JSX, type ValidComponent } from "@solidjs/web";
+import {
+  applyRef,
+  dynamic,
+  isServer,
+  type ComponentProps,
+  type JSX,
+  type ValidComponent,
+} from "@solidjs/web";
 import {
   animateTarget,
   defaultTransformValue,
@@ -13,6 +20,7 @@ import {
   type AnyResolvedKeyframe,
   type HTMLRenderState,
   type MotionNodeOptions,
+  type MotionValue,
   type SVGRenderState,
   type VisualElement,
 } from "motion-dom";
@@ -26,6 +34,7 @@ import {
   onCleanup,
   untrack,
   useContext,
+  type Component,
 } from "solid-js";
 import {
   LayoutGroupContext,
@@ -35,12 +44,20 @@ import {
   type MotionContextValue,
   type PresenceMember,
 } from "../context";
+import type { MotionComponentProps } from "../types";
 import { scheduleAnimateChanges } from "./animate-queue";
 import { initFeatures } from "./features";
-import { isLayoutNode, LayoutController, layoutScope, scopeOf, snapshotLayout } from "./layout";
+import {
+  commitLayout,
+  isLayoutNode,
+  LayoutController,
+  layoutScope,
+  scopeOf,
+  snapshotLayout,
+} from "./layout";
 import { createPresenceState } from "./presence";
 import { isSVGComponent, isValidMotionProp } from "./utils";
-import { buildInitialRender, makeVisualState, rawStyles } from "./visual-state";
+import { buildInitialRender, camelCaseStyle, makeVisualState, rawStyles } from "./visual-state";
 
 export interface MotionComponentOptions {
   /** Forward motion props (`animate`, `layout`…) to the wrapped component too. */
@@ -73,20 +90,23 @@ function getCurrentTreeVariants(
   return props.inherit !== false ? context : {};
 }
 
+/** A motion component rendering `C`: its props with the motion props on top. */
+export type MotionComponent<C extends ValidComponent = ValidComponent> = Component<
+  MotionComponentProps<ComponentProps<C>>
+>;
+
 /**
  * Creates a motion component that renders `component` (a tag name like
  * "div", or a component that forwards its `ref` to an element).
  */
-export type MotionComponent = (props: Props) => JSX.Element;
-
-export function createMotionComponent(
-  component: ValidComponent,
+export function createMotionComponent<C extends ValidComponent>(
+  component: C,
   { forwardMotionProps = false, type }: MotionComponentOptions = {},
-): MotionComponent {
+): MotionComponent<C> {
   initFeatures();
   const isSVG = type ? type === "svg" : isSVGComponent(component);
   const isDOM = typeof component === "string";
-  const Rendered = dynamic(() => component, { static: true });
+  const Rendered = dynamic<ValidComponent>(() => component, { static: true });
 
   return function MotionComponent(props: Props): JSX.Element {
     const config = useContext(MotionConfigContext);
@@ -109,6 +129,9 @@ export function createMotionComponent(
       );
     });
 
+    /** `style` with camelCase keys, as motion-dom reads it. */
+    const styleProp = createMemo(() => camelCaseStyle(props.style));
+
     /**
      * The props the VisualElement sees, as React would pass them on a
      * render: config defaults, every prop except children and ref, and
@@ -117,7 +140,8 @@ export function createMotionComponent(
     const motionProps = createMemo(() => {
       const own: Record<string, unknown> = {};
       for (const key of Object.keys(props)) {
-        if (key !== "children" && key !== "ref") own[key] = props[key];
+        if (key === "style") own.style = styleProp();
+        else if (key !== "children" && key !== "ref") own[key] = props[key];
       }
       const merged = {
         transition: config.transition,
@@ -180,13 +204,18 @@ export function createMotionComponent(
       }
     }
 
+    /**
+     * Read from the props rather than `visualElement.props`, which only
+     * update once the effect below applies them: a child created in the
+     * same flush as a change must already see the new labels.
+     */
     const context: MotionContextValue = {
       visualElement,
       get initial() {
-        return getCurrentTreeVariants(visualElement?.props ?? initialProps, parentContext).initial;
+        return getCurrentTreeVariants(untrack(motionProps), parentContext).initial;
       },
       get animate() {
-        return getCurrentTreeVariants(visualElement?.props ?? initialProps, parentContext).animate;
+        return getCurrentTreeVariants(untrack(motionProps), parentContext).animate;
       },
     };
 
@@ -195,6 +224,8 @@ export function createMotionComponent(
     let isDisposed = false;
     /** Registers the element with AnimatePresence until it mounts. */
     let enterPresence: ((element: Element) => void) | undefined;
+    /** Hands a props change to the VisualElement. Client only. */
+    let applyProps: ((latest: MotionNodeOptions) => void) | undefined;
     const layout = visualElement?.projection
       ? new LayoutController(visualElement.projection, layoutGroup.group)
       : undefined;
@@ -233,6 +264,7 @@ export function createMotionComponent(
         if (!pending) return;
         // After this mount's animations have started (animate-queue).
         queueMicrotask(() => {
+          if (!ve.current) return; // Unmounted since.
           const state = ve.animationState?.getState() ?? {};
           const target: Record<string, AnyResolvedKeyframe> = {};
           for (const key in pending) {
@@ -302,14 +334,14 @@ export function createMotionComponent(
         settleReturningValues();
       };
 
-      createEffect(motionProps, (latest) => {
+      applyProps = (latest) => {
         if (!element) return;
         if (!isMounted) {
           /**
            * AnimatePresence mode="wait" creates entering children
-           * before it inserts them. Mount once they're on screen.
+           * before it inserts them. Mount once it does.
            */
-          if (presence && !element.isConnected) {
+          if (presence?.isWithheld(element)) {
             cancelDeferredMount?.();
             cancelDeferredMount = presence.deferMount(element, () => {
               const current = untrack(motionProps);
@@ -321,7 +353,7 @@ export function createMotionComponent(
           mount(latest);
         }
         update(latest);
-      });
+      };
 
       onCleanup(() => {
         isDisposed = true;
@@ -347,9 +379,16 @@ export function createMotionComponent(
           finalize();
         }
 
-        if (isLayout) layout!.projection.root!.didUpdate();
+        if (isLayout) commitLayout();
       });
     }
+
+    /*
+     * This effect and the layout one below are created on the server too,
+     * where they do nothing: Solid numbers owners for hydration, so both
+     * sides must create the same computations in the same order.
+     */
+    createEffect(motionProps, (latest) => applyProps?.(latest));
 
     /** Which props reach the rendered element (Motion for React's filterProps). */
     const isForwarded = (key: string) => {
@@ -363,7 +402,15 @@ export function createMotionComponent(
       const isValid = key.startsWith("on")
         ? !isMotionProp
         : (config.isValidProp?.(key) ?? !isMotionProp);
-      return isValid || (forwardMotionProps && isMotionProp) || (!isDOM && !isMotionProp);
+      if (isDOM) {
+        // An element would stringify a motion value. (A component's prop
+        // isn't read here: that would evaluate JSX props it may not use.)
+        return (
+          (isValid || (forwardMotionProps && isMotionProp)) &&
+          !isMotionValue(untrack(() => props[key]))
+        );
+      }
+      return isValid || (forwardMotionProps && isMotionProp) || !isMotionProp;
     };
     const elementProps = omit(props, (key) => typeof key !== "string" || !isForwarded(key));
 
@@ -375,15 +422,15 @@ export function createMotionComponent(
     );
     const style = () => ({
       ...rawStyles({
-        style: props.style,
+        style: styleProp(),
         layout: props.layout as MotionNodeOptions["layout"],
         layoutId: props.layoutId as string | undefined,
       }),
       ...initialRender.style,
     });
+    /** Tap targets are focusable, like a button. Tags only: a component keeps its own default. */
     const tabindex = () =>
-      props.tabindex ??
-      (isDOM && (props.whileTap || props.onTap || props.onTapStart) ? 0 : undefined);
+      props.tabindex ?? (props.whileTap || props.onTap || props.onTapStart ? 0 : undefined);
 
     const setElement = (instance: Element) => {
       element = instance;
@@ -392,55 +439,79 @@ export function createMotionComponent(
       if (ref) applyRef(ref as (el: Element) => void, instance);
     };
 
+    /** A motion value child's text node, made once per value. */
+    let valueChild: { value: MotionValue; text: Text; stop: VoidFunction } | undefined;
+    onCleanup(() => valueChild?.stop());
+
+    /**
+     * A motion value child renders as text, updated outside Solid. Cached:
+     * a component may read its children many times, or outside an owner.
+     */
+    const renderChild = (child: unknown): JSX.Element => {
+      if (!isMotionValue(child)) {
+        // No longer a motion value: drop the old one's subscription.
+        valueChild?.stop();
+        valueChild = undefined;
+        return child as JSX.Element;
+      }
+      if (isServer) return `${child.get()}`;
+      if (valueChild?.value !== child) {
+        valueChild?.stop();
+        const text = document.createTextNode(`${child.get()}`);
+        const stop = child.on("change", (latest) => {
+          text.data = `${latest}`;
+        });
+        valueChild = { value: child, text, stop };
+      }
+      return valueChild.text;
+    };
+
     /** Rendered inside the MotionContext so children resolve against it. */
     const MotionElement = () => {
-      const resolved = children(() => {
-        const child = props.children;
-        if (!isMotionValue(child)) return child as JSX.Element;
-        if (isServer) return `${child.get()}`;
-        // A motion value child renders as text, updated outside Solid.
-        const text = document.createTextNode(`${child.get()}`);
-        onCleanup(
-          child.on("change", (latest) => {
-            text.data = `${latest}`;
-          }),
-        );
-        return text;
-      });
+      /**
+       * A tag's children resolve here, so a change of them re-measures
+       * layout. A component reads its own lazily: inside any context it
+       * provides, and only if it renders them.
+       */
+      const resolved = isDOM ? children(() => renderChild(props.children)) : undefined;
 
-      if (layout) {
-        createEffect(
-          () => {
-            const latest = motionProps();
-            // A change of children is a re-render of this node.
-            if (latest.layoutDependency === undefined) resolved();
-            if (isMounted && !isDisposed) {
-              untrack(() => layout.willUpdate(latest));
-            }
-            return latest;
-          },
-          (latest) => {
-            if (!isMounted || isDisposed) return;
-            if (layout.isMounted) layout.didUpdate();
-            else if (isLayoutNode(latest)) layout.mount(latest);
-          },
-        );
-      }
+      createEffect(
+        () => {
+          const latest = motionProps();
+          // A change of children is a re-render of this node.
+          if (latest.layoutDependency === undefined) resolved?.();
+          if (layout && isMounted && !isDisposed) {
+            untrack(() => layout.willUpdate(latest));
+          }
+          return latest;
+        },
+        (latest) => {
+          if (!layout || !isMounted || isDisposed) return;
+          if (layout.isMounted) layout.didUpdate();
+          else if (isLayoutNode(latest)) layout.mount(latest);
+        },
+      );
 
       return createComponent(
         Rendered,
-        merge(elementProps, initialRender.attrs, {
-          get tabindex() {
-            return tabindex();
+        merge(
+          elementProps,
+          initialRender.attrs,
+          isDOM && {
+            get tabindex() {
+              return tabindex();
+            },
           },
-          get style() {
-            return style();
+          {
+            get style() {
+              return style();
+            },
+            ref: setElement,
+            get children() {
+              return resolved ? resolved() : renderChild(props.children);
+            },
           },
-          ref: setElement,
-          get children() {
-            return resolved();
-          },
-        }),
+        ),
       );
     };
 

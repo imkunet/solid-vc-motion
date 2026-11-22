@@ -55,8 +55,8 @@ export function createPresenceState(controller: PresenceController) {
     exit(apply: (absent: PresenceContextProps) => void) {
       for (const key of blockers.keys()) blockers.set(key, false);
       const absent = create(false);
-      const { promise, resolve } = Promise.withResolvers<void>();
-      onExitDone = resolve;
+      // Not Promise.withResolvers: the package ships ES2022.
+      const promise = new Promise<void>((resolve) => (onExitDone = resolve));
       apply(absent);
       checkDone();
       return promise;

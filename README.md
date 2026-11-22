@@ -92,7 +92,7 @@ Any motion element inside a removed child plays its exit, not just the outermost
 
 In React, if you toggle an element off and quickly back on, the same element reverses its exit. Solid always creates a new element, so the new one starts from where the old one was, and the old one is removed. It looks the same. This happens when:
 
-- the new element shows up in the same place as the one leaving, with the same motion elements inside;
+- the new element shows up in the same place as the one leaving, with the same motion elements inside (several elements leaving together pair up with the ones coming back in order, or by `key`);
 - and either nothing else was added when the old one left (a plain `<Show>` toggle), or both have the same `key` prop.
 
 Give elements different `key`s to stop this from happening.
@@ -109,7 +109,7 @@ React measures layout before every re-render and animates after it. Solid doesn'
 
 Each measurement covers the `layout` elements in the same container (the element's parent, or the parent of an outer `layout` element). Siblings that get pushed around animate. `layout` elements elsewhere on the page move along with the page, like in React.
 
-Sometimes the layout changes for a reason the element can't see, for example a class set on its parent. Use `layoutDependency={value()}` for those. To animate a reordered `<For>` list, wrap it in `LayoutGroup`, or put it inside a `motion` element that has `layout`.
+Sometimes the layout changes for a reason the element can't see, for example a class set on its parent. Use `layoutDependency={value()}` for those. Components made with `motion.create` measure when their props change, but not when only their children change: give them a `layoutDependency` to measure on content changes. To animate a reordered `<For>` list, wrap it in `LayoutGroup`, or put it inside a `motion` element that has `layout`.
 
 ### `LayoutGroup`
 
@@ -196,4 +196,4 @@ bun run build     # library build into dist/
 
 ## License
 
-MIT. Parts are ported from [Motion for React](https://github.com/motiondivision/motion), also MIT. See [LICENSE](LICENSE).
+MIT. Parts are ported from [Motion for React](https://github.com/motiondivision/motion), also MIT. See [LICENSE](LICENSE.md).

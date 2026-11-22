@@ -110,10 +110,32 @@ type StyleRecord = Record<string, string | number>;
 /** Solid writes styles with `setProperty`, which only accepts kebab-case. */
 const toCSSPropertyName = (key: string) => (key.startsWith("--") ? key : camelToDash(key));
 
+const isKebabCase = (key: string) => key.includes("-") && !key.startsWith("--");
+
 /**
- * Plain (non motion value) entries of the `style` prop. Motion owns the
- * values it renders itself (motion values, transforms and, with layout,
- * scale-corrected styles), so those are left out.
+ * `style` with kebab-case keys in camelCase, the form motion-dom keys
+ * everything by (value types, scale correctors, forced motion values).
+ * `-webkit-x` becomes `WebkitX`, which `camelToDash` turns back. Returns
+ * `style` itself when no key needs it.
+ */
+export function camelCaseStyle(style: unknown) {
+  if (!style || typeof style !== "object") return style;
+  const record = style as Record<string, unknown>;
+  if (!Object.keys(record).some(isKebabCase)) return style;
+  const output: Record<string, unknown> = {};
+  for (const key in record) {
+    const name = isKebabCase(key)
+      ? key.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase())
+      : key;
+    output[name] = record[key];
+  }
+  return output;
+}
+
+/**
+ * Plain (non motion value) entries of the camelCase `style` prop. Motion
+ * owns the values it renders itself (motion values, transforms and, with
+ * layout, scale-corrected styles), so those are left out.
  */
 export function rawStyles(props: MotionNodeOptions & { style?: unknown }) {
   const style = props.style as Record<string, unknown> | undefined;

@@ -1,5 +1,5 @@
-import { render } from "@solidjs/web";
-import { createRoot, createSignal, flush, For, Show } from "solid-js";
+import { render, type JSX } from "@solidjs/web";
+import { createContext, createRoot, createSignal, flush, For, Show, useContext } from "solid-js";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import {
   AnimatePresence,
@@ -8,6 +8,7 @@ import {
   fromMotionValue,
   motion,
   MotionConfig,
+  type MotionValue,
 } from "../src";
 
 const disposers: VoidFunction[] = [];
@@ -125,6 +126,23 @@ describe("motion components", () => {
     expect(circle.getAttribute("cx")).toBe("5");
     expect(circle.getAttribute("r")).toBe("2");
   });
+
+  test("motion.create children render inside the component's context", () => {
+    const Theme = createContext("none");
+    const Themed = (props: { ref?: (el: HTMLElement) => void; children?: JSX.Element }) => (
+      <Theme value="dark">
+        <section ref={props.ref}>{props.children}</section>
+      </Theme>
+    );
+    const MotionThemed = motion.create(Themed);
+    const Read = () => <span>{useContext(Theme)}</span>;
+    const container = mount(() => (
+      <MotionThemed animate={{ opacity: 1 }}>
+        <Read />
+      </MotionThemed>
+    ));
+    expect(container.querySelector("section > span")?.textContent).toBe("dark");
+  });
 });
 
 describe("motion values", () => {
@@ -154,6 +172,27 @@ describe("motion values", () => {
     expect(container.textContent).toBe("1");
     count.set(2);
     expect(container.textContent).toBe("2");
+  });
+
+  test("kebab-case style keys get Motion's units and scale correction", async () => {
+    let radius!: MotionValue<number>;
+    const container = mount(() => {
+      radius = createMotionValue(16);
+      return (
+        <>
+          <motion.div data-id="value" style={{ "border-radius": radius }} />
+          <motion.div data-id="layout" layout style={{ "border-top-left-radius": 8 }} />
+        </>
+      );
+    });
+    const value = container.querySelector<HTMLElement>("[data-id=value]")!;
+    const layout = container.querySelector<HTMLElement>("[data-id=layout]")!;
+    expect(value.style.borderRadius).toBe("16px");
+    // A layout node's radius is Motion's to render (scale-corrected).
+    expect(layout.style.borderTopLeftRadius).toBe("8px");
+    radius.set(20);
+    await nextFrame();
+    expect(value.style.borderRadius).toBe("20px");
   });
 
   test("fromMotionValue tracks changes in Solid", async () => {
@@ -232,6 +271,44 @@ describe("AnimatePresence", () => {
     expect(boxes[0].style.opacity).toBe("1");
     expect(boxes[0].style.transform).toBe("none");
     expect(completed).toBe(0);
+  });
+
+  test.each([
+    { pairing: "in order", keyed: false, back: ["a", "b", "c", "d"] },
+    { pairing: "by key", keyed: true, back: ["a", "c", "b", "d"] },
+  ])("children shown again together mid-exit take over $pairing", async ({ keyed, back }) => {
+    const [items, setItems] = createSignal(["a", "b", "c", "d"]);
+    const container = mount(() => (
+      <AnimatePresence>
+        <For each={items()}>
+          {(item) => (
+            <motion.p
+              key={keyed ? item : undefined}
+              data-item={item}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, x: item === "b" ? 100 : -100 }}
+              transition={{ duration: 0.2, ease: "linear" }}
+            >
+              {item}
+            </motion.p>
+          )}
+        </For>
+      </AnimatePresence>
+    ));
+    await wait(300);
+    setItems(["a", "d"]);
+    await wait(100);
+
+    setItems(back);
+    await settle();
+    await nextFrame();
+    expect(container.textContent).toBe(back.join(""));
+    // Each continues from its own exit: b moved right, c left.
+    const transformOf = (item: string) =>
+      container.querySelector<HTMLElement>(`[data-item=${item}]`)!.style.transform;
+    expect(transformOf("b")).toMatch(/translateX\(\d/);
+    expect(transformOf("c")).toMatch(/translateX\(-/);
   });
 
   test("removes children without exit work immediately", async () => {
@@ -315,5 +392,114 @@ describe("AnimatePresence", () => {
     expect(container.querySelector("[data-key=a]")).toBeNull();
     await wait(200);
     expect(entered.style.opacity).toBe("1");
+  });
+
+  test("works in a container outside the document", async () => {
+    const [key, setKey] = createSignal("a");
+    const container = document.createElement("div");
+    disposers.push(
+      render(
+        () => (
+          <AnimatePresence mode="wait">
+            <Show when={key()} keyed>
+              {(current) => (
+                <motion.div
+                  data-key={current}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.1 }}
+                />
+              )}
+            </Show>
+          </AnimatePresence>
+        ),
+        container,
+      ),
+    );
+    await wait(150);
+    const exiting = container.querySelector<HTMLElement>("[data-key=a]")!;
+    expect(exiting.style.opacity).toBe("1");
+
+    setKey("b");
+    await settle();
+    expect(container.querySelector("[data-key=b]")).toBeNull();
+    await wait(50);
+    expect(Number(exiting.style.opacity)).toBeLessThan(1);
+    await wait(150);
+    const entered = container.querySelector<HTMLElement>("[data-key=b]")!;
+    expect(container.contains(exiting)).toBe(false);
+    await wait(200);
+    expect(entered.style.opacity).toBe("1");
+  });
+
+  test('a nested AnimatePresence mounts its children once mode="wait" inserts them', async () => {
+    const [key, setKey] = createSignal("a");
+    const items: Record<string, HTMLElement> = {};
+    mount(() => (
+      <AnimatePresence mode="wait">
+        <Show when={key()} keyed>
+          {(current) => (
+            <motion.section exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
+              <AnimatePresence>
+                <motion.p
+                  ref={(el) => (items[current] = el)}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.1 }}
+                />
+              </AnimatePresence>
+            </motion.section>
+          )}
+        </Show>
+      </AnimatePresence>
+    ));
+    await wait(150);
+    setKey("b");
+    await settle();
+    await wait(50);
+    // Withheld while the outer exit runs: not mounted, so not animating.
+    expect(items.b.style.opacity).toBe("0");
+    await wait(400);
+    expect(items.b.style.opacity).toBe("1");
+  });
+
+  test("a child an inner presence releases into a subtree an outer one withholds mounts once inserted", async () => {
+    const [showFirst, setShowFirst] = createSignal(true);
+    const [inner, setInner] = createSignal("x");
+    const items: Record<string, HTMLElement> = {};
+    mount(() => (
+      <AnimatePresence mode="wait">
+        <Show when={showFirst()}>
+          <motion.div exit={{ opacity: 0 }} transition={{ duration: 0.3 }} />
+        </Show>
+        <section>
+          <AnimatePresence mode="wait">
+            <Show when={inner()} keyed>
+              {(current) => (
+                <motion.p
+                  ref={(el) => (items[current] = el)}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.1 }}
+                />
+              )}
+            </Show>
+          </AnimatePresence>
+        </section>
+      </AnimatePresence>
+    ));
+    await wait(150);
+    // y waits for x's exit; then the outer exit withholds the whole section.
+    setInner("y");
+    await settle();
+    setShowFirst(false);
+    await settle();
+    await wait(200);
+    // x has left, but the section is still out of the DOM.
+    expect(items.y.style.opacity).toBe("0");
+    await wait(400);
+    expect(items.y.style.opacity).toBe("1");
   });
 });

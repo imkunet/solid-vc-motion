@@ -1,5 +1,5 @@
 import { render } from "@solidjs/web";
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, flush, For, Show } from "solid-js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { AnimatePresence, LayoutGroup, motion } from "../src";
 
@@ -209,6 +209,81 @@ describe("layout animations", () => {
     await commit();
     expect(document.querySelector("[data-id=underline-a]")).toBeNull();
     expect(byId("underline-b").style.transform).toMatch(/translate3d\(-100px, 0px/);
+  });
+
+  test("a layoutId element replaced deep inside AnimatePresence still hands over", async () => {
+    const [selected, setSelected] = createSignal("a");
+    const [opacity, setOpacity] = createSignal(1);
+    layoutOf = (el) => {
+      const tab = el.closest<HTMLElement>("[data-tab]");
+      return { x: tab?.dataset.tab === "b" ? 100 : 0, y: 0, width: 50, height: 10 };
+    };
+    mount(() => (
+      <AnimatePresence>
+        <motion.nav animate={{ opacity: opacity() }}>
+          <For each={["a", "b"]}>
+            {(tab) => (
+              <div data-tab={tab}>
+                <Show when={selected() === tab}>
+                  <motion.span
+                    data-id={`underline-${tab}`}
+                    layoutId="underline"
+                    transition={slow}
+                  />
+                </Show>
+              </div>
+            )}
+          </For>
+        </motion.nav>
+      </AnimatePresence>
+    ));
+    await commit();
+    // An update earlier in the same tick queues motion-dom's microtask batch,
+    // so the root updates before the removed element finalizes.
+    setOpacity(0.5);
+    flush();
+    setSelected("b");
+    flush();
+    await commit();
+    expect(document.querySelector("[data-id=underline-a]")).toBeNull();
+    expect(byId("underline-b").style.transform).toMatch(/translate3d\(-100px, 0px/);
+  });
+
+  test("a second removal in the same tick animates nodes moved in by the first", async () => {
+    const [showA, setShowA] = createSignal(true);
+    const [showB, setShowB] = createSignal(true);
+    const [inList, setInList] = createSignal(false);
+    layoutOf = (el) => {
+      const index = [...el.parentElement!.children].indexOf(el);
+      const isList = el.parentElement!.dataset.id === "list";
+      return { x: isList ? 0 : 500, y: index * 100, width: 100, height: 100 };
+    };
+    mount(() => {
+      const moved = <motion.div data-id="moved" layout transition={slow} />;
+      return (
+        <>
+          <div data-id="list">
+            <Show when={showA()}>
+              <motion.div data-id="a" layout transition={slow} />
+            </Show>
+            <Show when={showB()}>
+              <motion.div data-id="b" layout transition={slow} />
+            </Show>
+            {inList() ? moved : null}
+          </div>
+          <div>{inList() ? null : moved}</div>
+        </>
+      );
+    });
+    await commit();
+    setShowA(false);
+    setInList(true);
+    flush();
+    // "moved" is now second in the list; removing "b" moves it up.
+    setShowB(false);
+    flush();
+    await commit();
+    expect(byId("moved").style.transform).toMatch(/translate3d\(0px, 100px/);
   });
 
   test('mode="popLayout" lets siblings move into an exiting element\'s space', async () => {

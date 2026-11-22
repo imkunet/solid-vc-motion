@@ -385,10 +385,10 @@ class PinchGesture extends Feature<HTMLElement | SVGElement> {
   /** The element's touch-action not set by `style`, restored when pinch turns off. */
   private touchAction = "";
 
-  /** The touch-action `style` sets, in either key style. */
+  /** The touch-action `style` sets (camelCase, as the VisualElement's props are). */
   private styleTouchAction() {
     const { style } = this.node.getProps() as { style?: Record<string, unknown> };
-    const own = style?.touchAction ?? style?.["touch-action"];
+    const own = style?.touchAction;
     return typeof own === "string" && own ? own : undefined;
   }
 
